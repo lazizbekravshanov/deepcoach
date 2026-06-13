@@ -44,7 +44,8 @@ homography:
     - { name: circle_bottom,   pixel_xy: [380, 430], pitch_xy: [52.5, 43.15] }
 
 metrics:
-  enabled: [centroid, compactness, width, depth, def_line]
+  enabled: [centroid, compactness, width, depth, def_line, hull_area, pitch_control]
+  min_confidence: 0.3          # only reasonably-trusted dots feed the metrics (wrong-dot guard)
 
 render:
   radar: true

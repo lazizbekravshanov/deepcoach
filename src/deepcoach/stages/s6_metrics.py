@@ -66,6 +66,35 @@ def registered_metrics() -> list[str]:
     return sorted(_REGISTRY)
 
 
+# Frame-level metrics need ALL teams' positions at once (e.g. pitch control), so
+# they have their own registry with signature fn(by_team: dict[int,ndarray], ctx).
+_FRAME_REGISTRY: dict[str, Callable[..., object]] = {}
+
+
+def register_frame(name: str) -> Callable[[Callable], Callable]:
+    def _wrap(fn):
+        if name in _FRAME_REGISTRY:
+            raise ValueError(f"frame metric {name!r} already registered")
+        _FRAME_REGISTRY[name] = fn
+        return fn
+
+    return _wrap
+
+
+def get_frame_metric(name: str) -> Callable[..., object]:
+    if name not in _FRAME_REGISTRY:
+        raise KeyError(f"unknown frame metric {name!r}; registered: {sorted(_FRAME_REGISTRY)}")
+    return _FRAME_REGISTRY[name]
+
+
+def per_team_metrics() -> list[str]:
+    return sorted(_REGISTRY)
+
+
+def frame_metrics() -> list[str]:
+    return sorted(_FRAME_REGISTRY)
+
+
 # --- v1 metrics. Each is a pure fn(points_xy: (N,2) meters, ctx: dict) -> value.
 #     Field players only (gk/ref are excluded by the caller). New metrics attach
 #     by adding a function + @register here; no pipeline edit needed. ---
@@ -138,6 +167,54 @@ def _infer_own_goal_x(proj: ProjectionArtifact, pitch_length: float) -> dict[int
     return own
 
 
+@register("hull_area")
+def hull_area_m2(points: np.ndarray, ctx: dict) -> float:
+    """Space occupied by a team: area (m^2) of the convex hull of its players.
+
+    Per-frame and position-only, so it survives track fragmentation. <3 players or
+    a degenerate (collinear) set -> 0.0.
+    """
+    pts = np.asarray(points, dtype=float)
+    if len(pts) < 3:
+        return 0.0
+    try:
+        from scipy.spatial import ConvexHull
+
+        return float(ConvexHull(pts).volume)  # 2D ConvexHull.volume == polygon area
+    except Exception:
+        return 0.0  # collinear / degenerate
+
+
+@register_frame("pitch_control")
+def pitch_control(by_team: dict, ctx: dict, step: float = 2.0) -> dict:
+    """Territorial dominance: fraction of the pitch each team's players are nearest to.
+
+    Grid-sample the pitch; each cell is controlled by the team owning the closest
+    player (a nearest-neighbour / Voronoi partition). Per-frame, position-only —
+    robust to the ID fragmentation that highlight footage causes. Returns
+    {team_str: fraction}; fractions over teams sum to 1.
+    """
+    L, W = ctx.get("pitch_length", 105.0), ctx.get("pitch_width", 68.0)
+    xs = np.arange(step / 2.0, L, step)
+    ys = np.arange(step / 2.0, W, step)
+    gx, gy = np.meshgrid(xs, ys)
+    cells = np.column_stack([gx.ravel(), gy.ravel()])  # (M, 2)
+
+    teams = [t for t in sorted(by_team) if len(by_team[t]) > 0]
+    if not teams:
+        return {}
+    mind = np.full(len(cells), np.inf)
+    owner = np.full(len(cells), -1)
+    for t in teams:
+        pts = np.asarray(by_team[t], dtype=float)
+        d = np.min(np.linalg.norm(cells[:, None, :] - pts[None, :, :], axis=2), axis=1)
+        closer = d < mind
+        mind[closer] = d[closer]
+        owner[closer] = t
+    total = len(cells)
+    return {str(t): float(np.sum(owner == t)) / total for t in teams}
+
+
 def run(config: ClipConfig) -> MetricsArtifact:
     name = config.clip_name()
     od = out_dir(name)
@@ -145,22 +222,30 @@ def run(config: ClipConfig) -> MetricsArtifact:
     proj = load_artifact(od / "projected.json", ProjectionArtifact, cfg_hash)
 
     L, W = config.pitch.length_m, config.pitch.width_m
+    min_conf = config.metrics.min_confidence
     own_goal = _infer_own_goal_x(proj, L)
     enabled = config.metrics.enabled
-    extra_metrics = [m for m in enabled if m not in CORE_METRICS]  # e.g. pitch_control later
+    team_extras = [m for m in enabled if m not in CORE_METRICS and m in _REGISTRY]  # e.g. hull_area
+    frame_extras = [m for m in enabled if m in _FRAME_REGISTRY]  # e.g. pitch_control
 
     out_frames: list[TeamShapeFrame] = []
     thin = 0
+    used = dropped = 0
     for f in proj.frames:
         by_team: dict[int, list[tuple[float, float]]] = defaultdict(list)
         for e in f.entries:
             if e.cls == ClassLabel.player and e.role == Role.field and e.team is not None:
+                if e.projection_confidence < min_conf:  # wrong-dot guard: skip untrusted dots
+                    dropped += 1
+                    continue
                 by_team[e.team].append((e.pitch_xy.x_m, e.pitch_xy.y_m))
+                used += 1
 
+        team_pts = {t: np.array(v, dtype=float) for t, v in by_team.items() if v}
         shapes: list[TeamShape] = []
         extra: dict[str, object] = {}
-        for team in sorted(by_team):
-            pts = np.array(by_team[team], dtype=float)
+        for team in sorted(team_pts):
+            pts = team_pts[team]
             if len(pts) < THIN_FRAME_PLAYERS:
                 thin += 1
             ctx = {"own_goal_x": own_goal.get(team, 0.0), "pitch_length": L, "pitch_width": W}
@@ -176,8 +261,12 @@ def run(config: ClipConfig) -> MetricsArtifact:
                     defensive_line_height_m=def_line(pts, ctx),
                 )
             )
-            for m in extra_metrics:
+            for m in team_extras:
                 extra.setdefault(str(team), {})[m] = get_metric(m)(pts, ctx)  # type: ignore[index]
+
+        fctx = {"pitch_length": L, "pitch_width": W}
+        for m in frame_extras:
+            extra[m] = get_frame_metric(m)(team_pts, fctx)
 
         out_frames.append(
             TeamShapeFrame(frame_idx=f.frame_idx, timestamp_s=f.timestamp_s, teams=shapes, extra=extra)
@@ -192,8 +281,16 @@ def run(config: ClipConfig) -> MetricsArtifact:
     )
     save_artifact(art, od / "metrics.json")
     sides = {t: ("left" if x == 0.0 else "right") for t, x in own_goal.items()}
+    total = used + dropped
+    kept_pct = (100.0 * used / total) if total else 0.0
     print(
         f"[s6_metrics] {name}: {len(out_frames)} frames, metrics={enabled}, "
         f"inferred defending side per team={sides}, {thin} thin team-frames (<{THIN_FRAME_PLAYERS} players)"
     )
+    print(
+        f"[s6_metrics] confidence>={min_conf}: used {used}/{total} field-player dots "
+        f"({kept_pct:.0f}%), dropped {dropped} as low-confidence"
+    )
+    if min_conf > 0 and kept_pct < 40:
+        print("[s6_metrics] WARNING: most dots dropped as low-confidence — metrics rest on few players.")
     return art

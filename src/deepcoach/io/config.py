@@ -65,12 +65,16 @@ class MetricsSpec(BaseModel):
     enabled: list[str] = Field(
         default_factory=lambda: ["centroid", "compactness", "width", "depth", "def_line"]
     )
+    # Only dots with projection_confidence >= this feed the metrics (wrong-dot guard).
+    # 0.0 = use everything. Raise it on shaky footage so untrustworthy dots are excluded.
+    min_confidence: float = 0.0
 
 
 class RenderSpec(BaseModel):
     radar: bool = True
     overlay: bool = True
     heatmap: bool = True
+    pitch_control: bool = True  # aggregate territorial dominance map
 
 
 class ClipConfig(BaseModel):

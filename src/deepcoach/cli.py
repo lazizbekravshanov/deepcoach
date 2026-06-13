@@ -11,7 +11,7 @@ import typer
 
 from .io.config import load_config
 from .quality import report as quality_report
-from .render import heatmap, overlay, radar
+from .render import heatmap, overlay, pitchcontrol, radar
 from .stages import (
     s0_ingest,
     s1_detect,
@@ -59,17 +59,19 @@ def run(
 @app.command()
 def render(
     config: str = typer.Option(..., "--config", "-c", help="path to per-clip YAML config"),
-    what: str = typer.Option("all", "--what", help="all | radar | overlay | heatmap"),
+    what: str = typer.Option("all", "--what", help="all | radar | overlay | heatmap | pitch_control"),
 ) -> None:
-    """Render outputs enabled in the config (radar / overlay / heatmap)."""
+    """Render outputs enabled in the config (radar / overlay / heatmap / pitch_control)."""
     cfg = load_config(config)
-    do = {w: (what in ("all", w)) for w in ("radar", "overlay", "heatmap")}
+    do = {w: (what in ("all", w)) for w in ("radar", "overlay", "heatmap", "pitch_control")}
     if do["overlay"] and cfg.render.overlay:
         overlay.render(cfg)
     if do["radar"] and cfg.render.radar:
         radar.render(cfg)
     if do["heatmap"] and cfg.render.heatmap:
         heatmap.render(cfg)
+    if do["pitch_control"] and cfg.render.pitch_control:
+        pitchcontrol.render(cfg)
 
 
 @app.command()

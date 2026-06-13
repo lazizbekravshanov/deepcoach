@@ -412,16 +412,28 @@ CLI form (see §9): `deepcoach run <stage> --config <clip.yaml>`.
 
 ### 7.6 S6 metrics — `stages/s6_metrics.py`
 - Input: `ProjectionArtifact`.
-- Work: per frame, per team, compute the enabled metrics. Implemented via a
-  **registry**: `name -> fn(ProjectedFrame, ctx) -> value`. v1 registers
-  `centroid, compactness, width, depth, def_line`. GK/ref excluded from team-shape
-  math; metrics record `n_players` actually used so a thin frame is visible.
+- **Confidence-gating (wrong-dot guard):** only dots with
+  `projection_confidence >= metrics.min_confidence` feed the metrics; the run
+  reports used-vs-dropped and warns when most are dropped. Metrics from
+  untrustworthy positions are themselves untrustworthy, so we exclude rather than
+  average them in.
+- Work: per frame compute the enabled metrics via **two registries**:
+  - per-team `fn(points, ctx)` — `centroid, compactness, width, depth, def_line`
+    and `hull_area` (space occupied = convex-hull area).
+  - frame-level `fn(by_team, ctx)` — `pitch_control` (territorial dominance via a
+    nearest-player / Voronoi partition), needing all teams at once; results land
+    in `TeamShapeFrame.extra`.
+  `pitch_control` and `hull_area` are per-frame / position-only, so they survive
+  the track fragmentation broadcast footage causes. GK/ref excluded; each team
+  records `n_players` so thin frames are visible.
 - Output: `MetricsArtifact` → `data/out/<clip>/metrics.json`.
-- Quality: per-metric coverage (frames where it could be computed vs. skipped for
-  too-few-players), low-confidence-input fraction propagated from S5.
-- **`# EXTENSION POINT: register new metrics here`** — add a function + register
-  it under a name; enable it in config `metrics.enabled`. Future: `pitch_control`
-  (Voronoi) and, far later, event metrics. No pipeline edit required.
+- Quality: used-vs-dropped dot counts, thin-team-frame count, inferred defending
+  side per team (a heuristic — surfaced because it can be wrong on poor footage).
+- **`# EXTENSION POINT: register new metrics here`** — add a function + `@register`
+  (per-team) or `@register_frame` (needs all teams); enable it in
+  `metrics.enabled`. Far later: event metrics. No pipeline edit required.
+- Render: `render/pitchcontrol.py` turns `pitch_control` into an aggregate
+  territorial-dominance map (PNG), confidence-gated like the metric.
 
 ---
 
