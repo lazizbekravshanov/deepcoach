@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepcoach"
+version = "0.1.0"
+description = "One soccer clip -> tactical-spatial data: players & ball as dots on a 2D pitch."
+readme = "README.md"
+requires-python = ">=3.14"
+license = { file = "LICENSE" }
+
+# Core deps: enough to load configs, define/validate contracts, read frames, and
+# run the CLI dispatcher. Deliberately light so contracts + io are testable without
+# the heavy CV stack. Pinned for reproducibility; versions verified on Python 3.14.
+dependencies = [
+    "pydantic==2.13.4",
+    "pyyaml==6.0.3",
+    "numpy==2.4.6",
+    "typer==0.26.7",
+    "opencv-python==4.13.0.92",
+]
+
+[project.optional-dependencies]
+# The model/geometry/render stack, pulled in only when running stages S1-S6 and
+# rendering. Kept separate so the contract layer installs fast and clean.
+cv = [
+    "ultralytics==8.4.66",
+    "supervision==0.28.0",
+    "torch==2.12.0",
+    "torchvision==0.27.0",
+    "scipy==1.17.1",
+    "scikit-learn==1.9.0",
+    "matplotlib==3.11.0",
+]
+# S0 ingest from a YouTube URL. Also requires ffmpeg as a SYSTEM dependency
+# (brew install ffmpeg) for stream merging / transcoding. Local-file ingest and
+# scene-cut detection work without this extra.
+ingest = [
+    "yt-dlp==2026.6.9",
+]
+dev = [
+    "pytest==9.0.3",
+]
+
+[project.scripts]
+deepcoach = "deepcoach.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

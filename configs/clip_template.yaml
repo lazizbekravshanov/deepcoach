@@ -1,0 +1,54 @@
+# deepcoach per-clip config template.
+# Copy this to configs/<your_clip>.yaml and edit. Adding a new clip is a config
+# change, never a code change (ARCHITECTURE.md §9). Every artifact records the
+# sha256[:16] hash of this file's canonical content so output is traceable.
+
+clip:
+  path: data/in/example.mp4   # normalized clip location: S0 ingest WRITES here, S1 detect READS here
+  # source = what S0 ingest pulls from (optional). Omit if you placed the file yourself.
+  source:
+    kind: file                # file | youtube
+    ref: /path/to/your/highlight.mp4   # local path, or a YouTube URL when kind: youtube
+  fps_override: null          # set a number if the container fps is wrong/missing
+  frame_range: null           # null = whole clip, or [start, end) frame indices, e.g. [0, 750]
+                              # ^ use this to select ONE continuous shot out of an edited reel
+
+ingest:                       # S0 ingest behavior
+  detect_cuts: true           # scan for scene cuts (flags edited highlight reels)
+  cut_threshold: 0.5          # histogram dissimilarity >= this counts as a cut (0..1)
+  scan_step: 1                # decimate frames during the scan for speed (1 = every frame)
+  normalize: true             # transcode to H.264 mp4 via ffmpeg when available
+
+pitch:
+  length_m: 105               # real-world pitch length (goal to goal)
+  width_m: 68                 # real-world pitch width (touchline to touchline)
+
+model:
+  weights: yolov8n.pt         # EXTENSION POINT: a soccer fine-tuned weight file swaps in here
+  conf_threshold: 0.25        # detections below this are dropped
+  device: mps                 # mps (Apple Silicon) | cpu | cuda
+
+teams:
+  n_teams: 2                  # outfield teams; GK/ref are detected as edge cases, not extra clusters
+  sample_frames: [30, 90, 150]  # frames used to LEARN the two team jersey colors
+
+homography:
+  mode: manual                # EXTENSION POINT: "auto" -> automatic pitch-line detection
+  keyframe_idx: 0             # frame you click landmarks on (static-camera assumption)
+  # Clicked correspondences: pixel location in the frame <-> known meters on the pitch.
+  # Pitch origin (0,0) = one corner; x_m along length (0..length_m), y_m along width (0..width_m).
+  # Provide >= 4 well-spread landmarks; more + better spread = lower reprojection error.
+  landmarks:
+    - { name: corner_tl,    pixel_xy: [0, 0],     pitch_xy: [0, 0] }
+    - { name: corner_tr,    pixel_xy: [0, 0],     pitch_xy: [105, 0] }
+    - { name: corner_br,    pixel_xy: [0, 0],     pitch_xy: [105, 68] }
+    - { name: corner_bl,    pixel_xy: [0, 0],     pitch_xy: [0, 68] }
+    - { name: center_spot,  pixel_xy: [0, 0],     pitch_xy: [52.5, 34] }
+
+metrics:
+  enabled: [centroid, compactness, width, depth, def_line]  # add registered names here
+
+render:
+  radar: true                 # top-down minimap video
+  overlay: true               # annotated original video (sanity check)
+  heatmap: true               # per-player occupancy heatmaps

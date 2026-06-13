@@ -1,0 +1,24 @@
+# data: clips in, artifacts out — never committed
+/data/in/*
+/data/out/*
+!/data/in/.gitkeep
+!/data/out/.gitkeep
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# model weights downloaded at runtime
+*.pt
+*.onnx
+
+# os
+.DS_Store
