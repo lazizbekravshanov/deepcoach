@@ -60,20 +60,21 @@ def _have_ffmpeg() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
-def _download_youtube(url: str, workdir: Path, notes: list[str]) -> Path:
-    """Download a YouTube URL to a local file. Requires the `ingest` extra (yt-dlp)."""
+def _download_youtube(url: str, workdir: Path, notes: list[str], max_height: int | None = None) -> Path:
+    """Download a YouTube URL to a local file. Requires the `ingest` extra (yt-dlp).
+
+    For CV we don't need audio, so we prefer a single VIDEO-ONLY mp4 stream — this
+    unlocks 720p/1080p without ffmpeg (no audio merge needed). max_height caps it.
+    """
     try:
         import yt_dlp
     except ImportError as e:  # pragma: no cover - exercised only on the youtube path
         raise ImportError("YouTube ingest needs yt-dlp: pip install -e '.[ingest]'") from e
 
-    # Without ffmpeg, yt-dlp can't merge separate video/audio streams, so prefer a
-    # progressive (pre-muxed) mp4. With ffmpeg, allow best video+audio and merge.
-    if _have_ffmpeg():
-        fmt = "bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best"
-    else:
-        fmt = "best[ext=mp4]/best"
-        notes.append("ffmpeg missing: limited to progressive formats; install ffmpeg for best quality")
+    hcap = f"[height<={max_height}]" if max_height else ""
+    # video-only mp4 first (no merge, no ffmpeg), then progressive mp4, then anything.
+    fmt = f"bestvideo[ext=mp4]{hcap}/best[ext=mp4]{hcap}/best{hcap}/best"
+    notes.append(f"downloaded video-only mp4 (no audio; not needed for CV){' capped at '+str(max_height)+'p' if max_height else ''}")
 
     out_tmpl = str(workdir / "%(id)s.%(ext)s")
     opts = {"format": fmt, "outtmpl": out_tmpl, "quiet": True, "noprogress": True}
@@ -114,7 +115,7 @@ def run(config: ClipConfig) -> IngestArtifact:
     with tempfile.TemporaryDirectory() as td:
         workdir = Path(td)
         if src_spec.kind == "youtube":
-            working = _download_youtube(src_spec.ref, workdir, notes)
+            working = _download_youtube(src_spec.ref, workdir, notes, config.ingest.max_height)
         elif src_spec.kind == "file":
             working = Path(src_spec.ref)
             if not working.exists():

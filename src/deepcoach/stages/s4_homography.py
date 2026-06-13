@@ -77,7 +77,7 @@ def pick_landmarks_interactive(config: ClipConfig) -> list[PitchLandmark]:
         if event == cv2.EVENT_LBUTTONDOWN:
             state["xy"] = (float(x), float(y))
 
-    win = "deepcoach S4 — click each landmark (ENTER=confirm, u=undo, ESC=abort)"
+    win = "deepcoach S4 — ENTER=confirm  u=undo  s=skip(not visible)  ESC=abort"
     cv2.namedWindow(win)
     cv2.setMouseCallback(win, _on_mouse)
     while state["current"] < len(specs):
@@ -87,22 +87,29 @@ def pick_landmarks_interactive(config: ClipConfig) -> list[PitchLandmark]:
             cv2.circle(disp, (int(p.pixel_xy[0]), int(p.pixel_xy[1])), 5, (0, 255, 0), -1)
         if state["xy"] is not None:
             cv2.circle(disp, (int(state["xy"][0]), int(state["xy"][1])), 5, (0, 0, 255), 2)
-        cv2.putText(disp, f"Click: {spec.name} @ pitch{spec.pitch_xy}", (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        cv2.putText(disp, f"[{state['current']+1}/{len(specs)}] click {spec.name} @ {spec.pitch_xy}m",
+                    (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.putText(disp, f"confirmed: {len(picked)} (need >=4)", (20, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         cv2.imshow(win, disp)
         key = cv2.waitKey(20) & 0xFF
         if key == 27:  # ESC
             cv2.destroyWindow(win)
             raise KeyboardInterrupt("landmark picking aborted")
-        if key in (ord("u"),) and picked:
-            picked.pop()
-            state["current"] -= 1
+        if key == ord("s"):  # skip a landmark not visible in this frame
+            state["current"] += 1
             state["xy"] = None
-        if key in (13, 10) and state["xy"] is not None:  # ENTER
+        if key == ord("u") and picked:
+            picked.pop()
+            state["current"] = max(0, state["current"] - 1)
+            state["xy"] = None
+        if key in (13, 10) and state["xy"] is not None:  # ENTER confirms the click
             picked.append(PitchLandmark(name=spec.name, pixel_xy=state["xy"], pitch_xy=spec.pitch_xy))
             state["current"] += 1
             state["xy"] = None
     cv2.destroyWindow(win)
+    if len(picked) < 4:
+        raise ValueError(f"need >= 4 clicked landmarks, got {len(picked)}")
     return picked
 
 

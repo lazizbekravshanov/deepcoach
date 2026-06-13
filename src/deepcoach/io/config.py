@@ -36,6 +36,7 @@ class IngestSpec(BaseModel):
     cut_threshold: float = 0.5  # Bhattacharyya distance >= this = a cut (0..1)
     scan_step: int = 1  # decimate frames during the cut scan for speed
     normalize: bool = True  # transcode to H.264 mp4 via ffmpeg when available
+    max_height: int | None = None  # cap download resolution (e.g. 720); None = best mp4
 
 
 class PitchSpec(BaseModel):

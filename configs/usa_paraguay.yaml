@@ -1,0 +1,52 @@
+clip:
+  path: data/in/usa_paraguay.mp4
+  source:
+    kind: youtube
+    ref: https://www.youtube.com/watch?v=lpDZwAxVkc4
+  fps_override: null
+  frame_range: [71628, 72996]  # shot3 @ 720p/60fps: 22.8s wide view w/ center circle @ 19.9min
+
+ingest:
+  detect_cuts: false           # cut structure already known (272 cuts); same timeline at 720p
+  cut_threshold: 0.5
+  scan_step: 2
+  normalize: false             # video-only mp4 downloads directly; no transcode needed
+  max_height: 720              # pull 720p video-only stream (no audio, no ffmpeg)
+
+pitch:
+  length_m: 105
+  width_m: 68
+
+model:
+  weights: yolov8n.pt
+  conf_threshold: 0.3
+  device: mps
+
+teams:
+  n_teams: 2
+
+homography:
+  mode: manual
+  keyframe_idx: 72312          # middle of shot3 (720p/60fps)
+  # Orientation convention (as you look at the broadcast frame):
+  #   x_m increases LEFT -> RIGHT (0 = left goal end, 105 = right goal end)
+  #   y_m increases TOP -> BOTTOM (0 = far/top touchline, 68 = near/bottom touchline)
+  # Click the 4 compass points of the center circle + the center spot (clearly
+  # visible). Click the touchline intersections too if you can see them; skip ('s')
+  # any you can't. Need >= 4. pixel_xy are placeholders until you click.
+  # APPROXIMATE pixel_xy — AI-estimated from the keyframe, NOT precise clicks.
+  # Re-run `deepcoach run s4_homography` and click for an accurate homography.
+  landmarks:
+    - { name: center_spot,     pixel_xy: [385, 300], pitch_xy: [52.5, 34.0] }
+    - { name: circle_left,     pixel_xy: [175, 295], pitch_xy: [43.35, 34.0] }
+    - { name: circle_right,    pixel_xy: [590, 300], pitch_xy: [61.65, 34.0] }
+    - { name: circle_top,      pixel_xy: [390, 175], pitch_xy: [52.5, 24.85] }
+    - { name: circle_bottom,   pixel_xy: [380, 430], pitch_xy: [52.5, 43.15] }
+
+metrics:
+  enabled: [centroid, compactness, width, depth, def_line]
+
+render:
+  radar: true
+  overlay: true
+  heatmap: true
